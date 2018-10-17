@@ -11,10 +11,14 @@ local m = {
 
     nodes = {
         air = "air",
+
         wall = "default:steelblock",
         floor = "default:steelblock",
         pillar = "default:steelblock",
+
         lighting = "default:meselamp",
+
+        ladder = "default:ladder_steel",
         receptor = "default:goldblock",
     },
 }
@@ -25,6 +29,26 @@ function m.box()
     local extent = vector.new(m.extent_x, m.extent_y, m.extent_z)
     return origin, vector.subtract(origin, extent), vector.add(origin, extent)
 end
+
+-- Spawn is a safe zone.
+if minetest.get_modpath("tigris_base") then
+    local origin, boxmin, boxmax = m.box()
+    local old = tigris.check_pos_safe
+    tigris.check_pos_safe = function(pos)
+        local s = (pos.x >= boxmin.x and pos.y >= boxmin.y and pos.z >= boxmin.z and pos.x <= boxmax.x and pos.y <= boxmax.y and pos.z <= boxmax.z)
+        return s or old(pos)
+    end
+end
+
+-- Spawn is protected.
+(function()
+    local origin, boxmin, boxmax = m.box()
+    local old = minetest.is_protected
+    minetest.is_protected = function(pos, name)
+        local s = (pos.x >= boxmin.x and pos.y >= boxmin.y and pos.z >= boxmin.z and pos.x <= boxmax.x and pos.y <= boxmax.y and pos.z <= boxmax.z)
+        return s or old(pos, name)
+    end
+end)()
 
 if m.static_spawn then
     minetest.settings:set("static_spawnpoint", minetest.pos_to_string(({m.box()})[1]))
@@ -56,6 +80,7 @@ minetest.after(0, function()
         local emin, emax = vm:read_from_map(boxmin, boxmax)
         local area = VoxelArea:new({MinEdge = emin, MaxEdge = emax})
         local data = vm:get_data()
+        local p2data = vm:get_param2_data()
 
         -- Inner air.
         for i in area:iter(boxmin.x, boxmin.y, boxmin.z, boxmax.x, boxmax.y, boxmax.z) do
@@ -69,9 +94,16 @@ minetest.after(0, function()
                 data[i] = nodes.air
             end
 
+            local ladder_pos = (pos.x == origin.x and pos.z == origin.z + 6)
+
             -- Check for floor every 8 y.
-            if (pos.y + 1) % 8 == 0 then
+            if (pos.y + 1) % 8 == 0 and not ladder_pos then
                 data[i] = nodes.floor
+            end
+
+            if ladder_pos then
+                data[i] = nodes.ladder
+                p2data[i] = 4
             end
 
             if (pos.y >= (origin.y - 1) and pos.y <= (origin.y + 7)) and (pos.x == boxmin.x or pos.x == boxmax.x or pos.z == boxmin.z or pos.z == boxmax.z) then
@@ -79,7 +111,16 @@ minetest.after(0, function()
             end
         end
 
+        data[area:index(origin.x, origin.y - 1, origin.z)] = nodes.receptor
+        data[area:index(origin.x, origin.y - 1, origin.z - 1)] = nodes.receptor
+        data[area:index(origin.x - 1, origin.y - 1, origin.z)] = nodes.receptor
+        data[area:index(origin.x + 1, origin.y - 1, origin.z)] = nodes.receptor
+        data[area:index(origin.x, origin.y, origin.z - 1)] = nodes.receptor
+        data[area:index(origin.x - 1, origin.y, origin.z)] = nodes.receptor
+        data[area:index(origin.x + 1, origin.y, origin.z)] = nodes.receptor
+
         vm:set_data(data)
+        vm:set_param2_data(p2data)
         vm:write_to_map()
 
         m.generation_callback()
