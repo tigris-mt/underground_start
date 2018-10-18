@@ -5,7 +5,6 @@ local m = {
     extent_x = tonumber(minetest.settings:get("underground_start.extent_x")) or 12,
     extent_y = tonumber(minetest.settings:get("underground_start.extent_y")) or 17,
     extent_z = tonumber(minetest.settings:get("underground_start.extent_z")) or 12,
-    static_spawn = minetest.settings:get_bool("underground_start.static_spawn", true),
 
     tunnel_height = tonumber(minetest.settings:get("underground_start.tunnel_height")) or 5,
     tunnel_width = tonumber(minetest.settings:get("underground_start.tunnel_width")) or 24,
@@ -16,9 +15,9 @@ local m = {
     nodes = {
         air = "air",
 
-        wall = "default:obsidianbrick",
-        floor = "default:obsidianbrick",
-        pillar = "default:obsidianbrick",
+        wall = "default:obsidian_glass",
+        floor = "default:obsidian_glass",
+        pillar = "default:obsidian_glass",
 
         tunnel_floor = "default:wood",
 
@@ -80,9 +79,18 @@ end
     end
 end)()
 
-if m.static_spawn then
-    minetest.settings:set("static_spawnpoint", minetest.pos_to_string(({m.box()})[1]))
-end
+minetest.register_on_newplayer(function(player)
+    player:setpos(origin)
+end)
+
+local enable_bed_respawn = minetest.get_modpath("beds") and minetest.settings:get_bool("enable_bed_respawn", true)
+minetest.register_on_respawnplayer(function(player)
+    if enable_bed_respawn and beds and beds.spawn[player:get_player_name()] then
+        return
+    end
+    player:setpos(origin)
+    return true
+end)
 
 function m.generation_callback()
     -- Override elsewhere.
@@ -148,7 +156,7 @@ minetest.after(0, function()
                 data[i] = nodes.air
             end
 
-            local ladder_pos = (pos.x == origin.x and pos.z == origin.z + 6)
+            local ladder_pos = (pos.x == origin.x and pos.z == origin.z + 6) and pos.y ~= boxmin.y
 
             -- Check for floor every 8 y.
             if (pos.y + 1) % 8 == 0 and not ladder_pos then
