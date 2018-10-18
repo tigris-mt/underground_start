@@ -1,20 +1,26 @@
 local storage = minetest.get_mod_storage()
 
 local m = {
-    y = tonumber(minetest.settings:get("underground_start.y")) or -1000,
-    extent_x = tonumber(minetest.settings:get("underground_start.extent_x")) or 33,
+    y = tonumber(minetest.settings:get("underground_start.y")) or -200,
+    extent_x = tonumber(minetest.settings:get("underground_start.extent_x")) or 12,
     extent_y = tonumber(minetest.settings:get("underground_start.extent_y")) or 17,
-    extent_z = tonumber(minetest.settings:get("underground_start.extent_z")) or 33,
+    extent_z = tonumber(minetest.settings:get("underground_start.extent_z")) or 12,
     static_spawn = minetest.settings:get_bool("underground_start.static_spawn", true),
 
-    padding = 2,
+    tunnel_height = tonumber(minetest.settings:get("underground_start.tunnel_height")) or 5,
+    tunnel_width = tonumber(minetest.settings:get("underground_start.tunnel_width")) or 24,
+    tunnel_length = tonumber(minetest.settings:get("underground_start.tunnel_length")) or 121,
+
+    done = false,
 
     nodes = {
         air = "air",
 
-        wall = "default:steelblock",
-        floor = "default:steelblock",
-        pillar = "default:steelblock",
+        wall = "default:obsidianbrick",
+        floor = "default:obsidianbrick",
+        pillar = "default:obsidianbrick",
+
+        tunnel_floor = "default:wood",
 
         lighting = "default:meselamp",
 
@@ -30,23 +36,47 @@ function m.box()
     return origin, vector.subtract(origin, extent), vector.add(origin, extent)
 end
 
+local origin, boxmin, boxmax = m.box()
+
+local tunnels = {}
+local tw, th, tl = m.tunnel_width, m.tunnel_height, m.tunnel_length
+local function tunnel(min, max)
+    table.insert(tunnels, {min = min, max = max})
+end
+tunnel(vector.new(origin.x, origin.y - 9, origin.z - tw / 2), vector.new(origin.x + tl, origin.y, origin.z + tw / 2))
+tunnel(vector.new(origin.x - tl, origin.y - 9, origin.z - tw / 2), vector.new(origin.x, origin.y, origin.z + tw / 2))
+tunnel(vector.new(origin.x - tw / 2, origin.y - 9, origin.z), vector.new(origin.x + tw / 2, origin.y, origin.z + tl))
+tunnel(vector.new(origin.x - tw / 2, origin.y - 9, origin.z - tl), vector.new(origin.x + tw / 2, origin.y, origin.z))
+
+local boxes = {{min = boxmin, max = boxmax}}
+for _,v in ipairs(tunnels) do
+    table.insert(boxes, v)
+end
+
+local function in_boxes(pos)
+    local origin, boxmin, boxmax = m.box()
+    for _,box in ipairs(boxes) do
+        local boxmin, boxmax = box.min, box.max
+        if pos.x >= boxmin.x and pos.y >= boxmin.y and pos.z >= boxmin.z and pos.x <= boxmax.x and pos.y <= boxmax.y and pos.z <= boxmax.z then
+            return true
+        end
+    end
+    return false
+end
+
 -- Spawn is a safe zone.
 if minetest.get_modpath("tigris_base") then
-    local origin, boxmin, boxmax = m.box()
     local old = tigris.check_pos_safe
     tigris.check_pos_safe = function(pos)
-        local s = (pos.x >= boxmin.x and pos.y >= boxmin.y and pos.z >= boxmin.z and pos.x <= boxmax.x and pos.y <= boxmax.y and pos.z <= boxmax.z)
-        return s or old(pos)
+        return in_boxes(pos) or old(pos)
     end
 end
 
 -- Spawn is protected.
 (function()
-    local origin, boxmin, boxmax = m.box()
     local old = minetest.is_protected
     minetest.is_protected = function(pos, name)
-        local s = (pos.x >= boxmin.x and pos.y >= boxmin.y and pos.z >= boxmin.z and pos.x <= boxmax.x and pos.y <= boxmax.y and pos.z <= boxmax.z)
-        return s or old(pos, name)
+        return in_boxes(pos) or old(pos, name)
     end
 end)()
 
@@ -75,6 +105,30 @@ minetest.after(0, function()
 
     local function generate()
         minetest.log("Generating spawn...")
+
+        -- Generate large tunnels of air.
+        local function tunnel(boxmin, boxmax)
+            local vm = minetest.get_voxel_manip()
+            local emin, emax = vm:read_from_map(boxmin, boxmax)
+            local area = VoxelArea:new({MinEdge = emin, MaxEdge = emax})
+            local data = vm:get_data()
+
+            for i in area:iter(boxmin.x, boxmin.y, boxmin.z, boxmax.x, boxmax.y, boxmax.z) do
+                local pos = area:position(i)
+                data[i] = nodes.air
+
+                if pos.y == boxmin.y then
+                    data[i] = (pos.x % 7 == 0 or pos.z % 7 == 0) and nodes.lighting or nodes.tunnel_floor
+                end
+            end
+
+            vm:set_data(data)
+            vm:write_to_map()
+        end
+
+        for _,v in ipairs(tunnels) do
+            tunnel(v.min, v.max)
+        end
 
         local vm = minetest.get_voxel_manip()
         local emin, emax = vm:read_from_map(boxmin, boxmax)
@@ -111,6 +165,7 @@ minetest.after(0, function()
             end
         end
 
+        -- Receptor pad.
         data[area:index(origin.x, origin.y - 1, origin.z)] = nodes.receptor
         data[area:index(origin.x, origin.y - 1, origin.z - 1)] = nodes.receptor
         data[area:index(origin.x - 1, origin.y - 1, origin.z)] = nodes.receptor
@@ -128,26 +183,33 @@ minetest.after(0, function()
         m.done = true
         storage:set_int("run", 1)
         minetest.log("Generated spawn in " .. (os.time() - begin_time) .. " seconds.")
+
+        for _,player in ipairs(minetest.get_connected_players()) do
+            player:setpos(origin)
+            player:set_look_horizontal(0)
+        end
     end
 
-    local waiting = 1
+    local waiting = #boxes
     local function check()
         waiting = waiting - 1
-        if waiting == 0 then
+        if waiting <= 0 then
             generate()
+        else
+            minetest.chat_send_all("Generated " .. (#boxes - waiting) .. "/" .. #boxes .. " segments.")
         end
     end
 
     minetest.log("Emerging spawn area...")
 
-    minetest.emerge_area(vector.multiply(boxmin, 1.15), vector.multiply(boxmax, 1.15), function(_, _, remain)
-        if remain % 10 == 0 then
-            minetest.log(remain .. " blocks left to emerge for spawn.")
-        end
-        if remain == 0 then
-            check()
-        end
-    end)
+    local r = vector.new(16, 16, 16)
+    for _,box in ipairs(boxes) do
+        minetest.emerge_area(vector.subtract(box.min, r), vector.add(box.max, r), function(_, _, remain)
+            if remain == 0 then
+                check()
+            end
+        end)
+    end
 end)
 
 minetest.register_on_joinplayer(function(player)
