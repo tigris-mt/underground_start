@@ -10,6 +10,8 @@ local m = {
     tunnel_width = tonumber(minetest.settings:get("underground_start.tunnel_width")) or 24,
     tunnel_length = tonumber(minetest.settings:get("underground_start.tunnel_length")) or 121,
 
+    near = tonumber(minetest.settings:get("underground_start.near") or 250),
+
     done = false,
 
     nodes = {
@@ -78,6 +80,12 @@ end
         return in_boxes(pos) or old(pos, name)
     end
 end)()
+
+function m.check_pos_near(pos)
+    if vector.distance(origin, pos) <= m.near then
+        return true
+    end
+end
 
 minetest.register_on_newplayer(function(player)
     player:setpos(origin)
