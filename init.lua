@@ -10,7 +10,7 @@ local m = {
     tunnel_width = tonumber(minetest.settings:get("underground_start.tunnel_width")) or 24,
     tunnel_length = tonumber(minetest.settings:get("underground_start.tunnel_length")) or 121,
 
-    near = tonumber(minetest.settings:get("underground_start.near") or 250),
+    near = tonumber(minetest.settings:get("underground_start.near") or 150),
 
     done = false,
 
@@ -39,10 +39,10 @@ end
 
 local origin, boxmin, boxmax = m.box()
 
-local tunnels = {}
+m.tunnels = {}
 local tw, th, tl = m.tunnel_width, m.tunnel_height, m.tunnel_length
 local function tunnel(min, max)
-    table.insert(tunnels, {min = min, max = max})
+    table.insert(m.tunnels, {min = min, max = max})
 end
 tunnel(vector.new(origin.x, origin.y - 9, origin.z - tw / 2), vector.new(origin.x + tl, origin.y, origin.z + tw / 2))
 tunnel(vector.new(origin.x - tl, origin.y - 9, origin.z - tw / 2), vector.new(origin.x, origin.y, origin.z + tw / 2))
@@ -50,7 +50,7 @@ tunnel(vector.new(origin.x - tw / 2, origin.y - 9, origin.z), vector.new(origin.
 tunnel(vector.new(origin.x - tw / 2, origin.y - 9, origin.z - tl), vector.new(origin.x + tw / 2, origin.y, origin.z))
 
 local boxes = {{min = boxmin, max = boxmax}}
-for _,v in ipairs(tunnels) do
+for _,v in ipairs(m.tunnels) do
     table.insert(boxes, v)
 end
 
@@ -142,7 +142,7 @@ minetest.after(0, function()
             vm:write_to_map()
         end
 
-        for _,v in ipairs(tunnels) do
+        for _,v in ipairs(m.tunnels) do
             tunnel(v.min, v.max)
         end
 
